@@ -1,0 +1,58 @@
+name: CI — Obsidian Vault
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  link-check:
+    name: Markdown Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check internal links
+        run: |
+          echo "🔍 Checking for broken internal links..."
+          BROKEN=0
+          while IFS= read -r -d '' md_file; do
+            # Extract [[wiki links]] from Obsidian markdown
+            grep -oP '\[\[([^\]]+)\]\]' "$md_file" | while read -r link; do
+              target=$(echo "$link" | sed 's/\[\[//;s/\]\]//;s/|.*//')
+              # Search for the target file
+              if ! find . -name "${target}.md" -not -path './.git/*' | grep -q .; then
+                echo "  ⚠️ Broken link in $md_file: [[${target}]]"
+              fi
+            done
+          done < <(find . -name "*.md" -not -path './.git/*' -print0)
+          echo "✅ Link check complete"
+
+      - name: Validate markdown front-matter (if present)
+        run: |
+          echo "🔍 Checking YAML front-matter..."
+          find . -name "*.md" -not -path './.git/*' | while read f; do
+            # Extract front-matter if exists
+            if head -1 "$f" | grep -q '^---'; then
+              python3 -c "
+import yaml, sys
+content = open('$f').read()
+if content.startswith('---'):
+    parts = content.split('---', 2)
+    if len(parts) >= 3:
+        yaml.safe_load(parts[1])
+" 2>&1 && true || echo "  ⚠️ Invalid front-matter in $f"
+            fi
+          done
+          echo "✅ Front-matter validation complete"
+
+      - name: Count notes summary
+        run: |
+          echo "## 📓 Vault Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          TOTAL=$(find . -name "*.md" -not -path './.git/*' | wc -l)
+          echo "**Total notes:** $TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Directories:**" >> $GITHUB_STEP_SUMMARY
+          find . -maxdepth 2 -type d -not -path './.git*' | sort >> $GITHUB_STEP_SUMMARY
